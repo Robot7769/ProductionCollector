@@ -1,12 +1,17 @@
 package me.robot7769.productionCollector;
 
+import me.robot7769.productionCollector.Listeners.*;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class ProductionCollector extends JavaPlugin {
 
     @Override
     public void onEnable() {
-        // Plugin startup logic
+
+        // Register listeners
+        getServer().getPluginManager().registerEvents(new ProductionListener(this), this);
+        getServer().getPluginManager().registerEvents(new PlaceCollector(this), this);
+        getServer().getPluginManager().registerEvents(new BreakCollector(this), this);
 
     }
 
