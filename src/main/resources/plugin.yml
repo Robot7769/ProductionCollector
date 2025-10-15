@@ -2,3 +2,9 @@ name: ProductionCollector
 version: '1.0.0'
 main: me.robot7769.productionCollector.ProductionCollector
 api-version: '1.21'
+
+commands:
+  scoreboard:
+    description: Ovládání production scoreboardu
+    usage: /scoreboard [refresh|hide|show]
+    aliases: [sb, production]

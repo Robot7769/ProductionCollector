@@ -4,7 +4,7 @@ plugins {
 }
 
 group = 'me.robot7769'
-version = '1.0.0'
+version = '1.1.0'
 
 repositories {
     mavenCentral()
@@ -16,6 +16,7 @@ repositories {
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT")
+    implementation("com.mysql:mysql-connector-j:8.2.0")
 }
 
 tasks {

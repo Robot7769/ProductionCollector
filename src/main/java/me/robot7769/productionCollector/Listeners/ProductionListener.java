@@ -1,6 +1,9 @@
 package me.robot7769.productionCollector.Listeners;
 
+import me.robot7769.productionCollector.Database.DatabaseManager;
 import me.robot7769.productionCollector.ProductionCollector;
+import me.robot7769.productionCollector.Scoreboard.ProductionScoreboard;
+import me.robot7769.productionCollector.Utils.Logger;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
@@ -15,48 +18,84 @@ import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
-import org.bukkit.scoreboard.Objective;
-import org.bukkit.scoreboard.Score;
-import org.bukkit.scoreboard.Scoreboard;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 public class ProductionListener implements Listener {
     private final ProductionCollector plugin;
-    private List<Material> collecteble;
-    private final String objectiveName = "ProductionCollector";
+    private final DatabaseManager databaseManager;
+    private final ProductionScoreboard productionScoreboard;
+    private final Logger logger;
+    private Map<Material, Integer> collectableItems;
     private final NamespacedKey ownerKey;
 
-    public ProductionListener(ProductionCollector plugin) {
+    public ProductionListener(ProductionCollector plugin, DatabaseManager databaseManager, ProductionScoreboard productionScoreboard, Logger logger) {
         this.plugin = plugin;
+        this.databaseManager = databaseManager;
+        this.productionScoreboard = productionScoreboard;
+        this.logger = logger;
         this.ownerKey = new NamespacedKey(plugin, "barrel_owner");
-        //load collectable item from config
-        collecteble = new ArrayList<>();
-        collecteble.add(Material.PUMPKIN);
-        collecteble.add(Material.PUMPKIN_PIE);
 
+        // Load collectable items from config
+        loadCollectableItems();
     }
 
-    public List<Material> getCollecteble() {
-        return collecteble;
+    private void loadCollectableItems() {
+        collectableItems = new HashMap<>();
+
+        if (plugin.getConfig().contains("collectable_items")) {
+            var section = plugin.getConfig().getConfigurationSection("collectable_items");
+            if (section != null) {
+                for (String key : section.getKeys(false)) {
+                    try {
+                        Material material = Material.valueOf(key.toUpperCase());
+                        int score = plugin.getConfig().getInt("collectable_items." + key);
+                        collectableItems.put(material, score);
+                        logger.info("Loaded collectable item: " + material + " with score value: " + score);
+                    } catch (IllegalArgumentException e) {
+                        logger.warning("Invalid material in config: " + key);
+                    }
+                }
+            }
+        } else {
+            // Default values if config is missing
+            logger.warning("No collectable_items found in config, using defaults");
+            collectableItems.put(Material.PUMPKIN, 3);
+            collectableItems.put(Material.PUMPKIN_PIE, 8);
+        }
+    }
+
+    public Map<Material, Integer> getCollectableItems() {
+        return collectableItems;
     }
 
     private void addScore(OfflinePlayer player, Material material, int amount) {
         if (amount <= 0) return;
-        if (material == Material.PUMPKIN_PIE) {
-            amount *= 2; //pumpkin pie is worth double
-        }
-        plugin.getLogger().info("Added " + amount + " of " + material + " to " + player.getName() + "'s score.");
 
-        Scoreboard sb = Bukkit.getScoreboardManager().getMainScoreboard();
-        Objective obj = sb.getObjective(objectiveName);
-        if (obj == null) {
-            obj = sb.registerNewObjective(objectiveName, "dummy", "Produkce");
+        Integer scoreValue = collectableItems.get(material);
+        if (scoreValue == null) return;
+
+        int totalScore = amount * scoreValue;
+
+        // Log to database
+        databaseManager.logProduction(
+            player.getName(),
+            player.getUniqueId().toString(),
+            material,
+            amount,
+            scoreValue,
+            totalScore
+        );
+
+        // Log production (DEBUG level - detailní info)
+        logger.logProduction(player.getName(), material.name(), amount, totalScore, "earned");
+
+        // Update scoreboard if player is online
+        if (player.isOnline() && player.getPlayer() != null) {
+            productionScoreboard.updatePlayerScoreboard(player.getPlayer());
         }
-        Score score = obj.getScore(player.getName());
-        score.setScore(score.getScore() + amount);
     }
 
     @EventHandler
@@ -75,7 +114,7 @@ public class ProductionListener implements Listener {
         // Případ 1: Hráč klikl na item v barelu (vybírání z barelu) - původní funkčnost
         if (clickedInv != null && clickedInv.getType() == InventoryType.BARREL && current != null && cursor.getType().isAir()) {
             Material type = current.getType();
-            if (!collecteble.contains(type)) return;
+            if (!collectableItems.containsKey(type)) return;
 
             // Počítá se score hráči, který na item kliknul (původní funkčnost)
             int amount = current.getAmount();
@@ -83,12 +122,12 @@ public class ProductionListener implements Listener {
             current.setAmount(0);
             event.setCancelled(true);
             clickedInv.remove(current);
-            plugin.getLogger().info("Player " + player.getName() + " collected " + amount + " " + type + " from barrel");
+            logger.logBarrelAction(player.getName(), player.getName(), "collected", type.name(), amount);
         }
         // Případ 2: Hráč vkládá item do barelu (kliká s itemem na kurzoru do barelu)
         else if (clickedInv != null && clickedInv.getType() == InventoryType.BARREL && !cursor.getType().isAir()) {
             Material cursorType = cursor.getType();
-            if (!collecteble.contains(cursorType)) return;
+            if (!collectableItems.containsKey(cursorType)) return;
 
             // Získat vlastníka barelu - počítá se score vlastníkovi barelu
             OfflinePlayer barrelOwner = getBarrelOwner(topInv);
@@ -103,7 +142,7 @@ public class ProductionListener implements Listener {
                     // Smazat item z kurzoru hráče
                     event.setCancelled(true);
                     player.setItemOnCursor(null);
-                    plugin.getLogger().info("Player " + player.getName() + " added " + cursorAmount + " " + cursorType + " to barrel owned by " + barrelOwner.getName());
+                    logger.logBarrelAction(player.getName(), barrelOwner.getName(), "added", cursorType.name(), cursorAmount);
                 }
                 // Pokud kliká na jiný typ itemu - vyměna
                 else if (current.getType() != cursorType) {
@@ -111,7 +150,7 @@ public class ProductionListener implements Listener {
                     addScore(barrelOwner, cursorType, cursorAmount);
 
                     // Pokud je current item taky collectible, započítat ho hráči
-                    if (collecteble.contains(current.getType())) {
+                    if (collectableItems.containsKey(current.getType())) {
                         addScore(player, current.getType(), current.getAmount());
                     }
 
@@ -119,14 +158,14 @@ public class ProductionListener implements Listener {
                     player.setItemOnCursor(current.clone());
                     current.setType(cursorType);
                     current.setAmount(cursorAmount);
-                    plugin.getLogger().info("Player " + player.getName() + " swapped items in barrel owned by " + barrelOwner.getName());
+                    logger.logBarrelAction(player.getName(), barrelOwner.getName(), "swapped", cursorType.name(), cursorAmount);
                 }
             }
         }
         // Případ 3: Hráč shift-clickne na item ve svém inventáři (přesune do barelu)
         else if (clickedInv != null && clickedInv.getType() != InventoryType.BARREL && current != null && event.isShiftClick()) {
             Material type = current.getType();
-            if (!collecteble.contains(type)) return;
+            if (!collectableItems.containsKey(type)) return;
 
             // Získat vlastníka barelu - počítá se score vlastníkovi barelu
             OfflinePlayer barrelOwner = getBarrelOwner(topInv);
@@ -137,7 +176,7 @@ public class ProductionListener implements Listener {
                 event.setCancelled(true);
                 current.setAmount(0);
                 player.updateInventory();
-                plugin.getLogger().info("Player " + player.getName() + " shift-clicked " + amount + " " + type + " to barrel owned by " + barrelOwner.getName());
+                logger.logBarrelAction(player.getName(), barrelOwner.getName(), "shift-added", type.name(), amount);
             }
         }
     }
@@ -149,7 +188,7 @@ public class ProductionListener implements Listener {
 
         ItemStack item = event.getItem();
         Material type = item.getType();
-        if (!collecteble.contains(type)) return;
+        if (!collectableItems.containsKey(type)) return;
         int amount = item.getAmount();
 
         //barrel owner
@@ -157,12 +196,10 @@ public class ProductionListener implements Listener {
         if (barrelOwner != null) {
             addScore(barrelOwner, type, amount);
             item.setAmount(0);
-            // Smazat item z barelu aby se nemohl znovu započítat
-            //event.setCancelled(true); // Zruší přesun
-            // Nebo alternativně můžeme item smazat z cílového inventáře:
             destination.removeItem(item);
+            logger.debug("Hopper moved " + amount + "x " + type + " to barrel owned by " + barrelOwner.getName());
         } else {
-            plugin.getLogger().warning("Could not determine barrel owner");
+            logger.warning("Could not determine barrel owner for hopper transfer");
         }
     }
 
@@ -177,7 +214,7 @@ public class ProductionListener implements Listener {
                     UUID uuid = UUID.fromString(ownerUUID);
                     return Bukkit.getOfflinePlayer(uuid); // Vrátí OfflinePlayer i pro offline hráče
                 } catch (IllegalArgumentException e) {
-                    plugin.getLogger().warning("Invalid UUID in barrel data: " + ownerUUID);
+                    logger.warning("Invalid UUID in barrel data: " + ownerUUID);
                 }
             }
         }
