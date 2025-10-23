@@ -16,6 +16,7 @@ public class DatabaseManager {
     private final String database;
     private final String username;
     private final String password;
+    private final String jdbcUrl;
 
     public DatabaseManager(ProductionCollector plugin, Logger logger) {
         this.plugin = plugin;
@@ -24,6 +25,17 @@ public class DatabaseManager {
         this.database = plugin.getConfig().getString("database_name", "event_production");
         this.username = plugin.getConfig().getString("database_user", "eventer_DB");
         this.password = plugin.getConfig().getString("database_password", "");
+
+        // Parse host URL and prepare JDBC URL with connection pooling settings
+        String cleanHost = host.replace("mysql://", "");
+        this.jdbcUrl = "jdbc:mysql://" + cleanHost + ":3306/" + database
+            + "?useSSL=false"
+            + "&serverTimezone=UTC"
+            + "&autoReconnect=true"
+            + "&maxReconnects=3"
+            + "&initialTimeout=2"
+            + "&testOnBorrow=true"
+            + "&validationQuery=SELECT 1";
     }
 
     public void connect() {
@@ -31,10 +43,6 @@ public class DatabaseManager {
             if (connection != null && !connection.isClosed()) {
                 return;
             }
-
-            // Parse host URL
-            String cleanHost = host.replace("mysql://", "");
-            String jdbcUrl = "jdbc:mysql://" + cleanHost + ":3306/" + database + "?useSSL=false&serverTimezone=UTC";
 
             connection = DriverManager.getConnection(jdbcUrl, username, password);
             logger.info("Successfully connected to database!");
@@ -81,7 +89,23 @@ public class DatabaseManager {
         }
     }
 
+    /**
+     * Zkontroluje platnost připojení a případně ho obnoví
+     */
+    private void ensureConnection() {
+        try {
+            if (connection == null || connection.isClosed() || !connection.isValid(2)) {
+                logger.info("Database connection lost, reconnecting...");
+                connection = DriverManager.getConnection(jdbcUrl, username, password);
+                logger.info("Database connection restored!");
+            }
+        } catch (SQLException e) {
+            logger.error("Failed to ensure database connection", e);
+        }
+    }
+
     public void logProduction(String playerName, String playerUUID, Material material, int amount, int scoreValue, int totalScore) {
+        ensureConnection();
         String insertSQL = "INSERT INTO production_logs (player_name, player_uuid, material, amount, score_value, total_score) VALUES (?, ?, ?, ?, ?, ?)";
 
         try (PreparedStatement statement = connection.prepareStatement(insertSQL)) {
@@ -98,6 +122,7 @@ public class DatabaseManager {
     }
 
     public Map<Material, Integer> getPlayerProductionCounts(String playerUUID) {
+        ensureConnection();
         Map<Material, Integer> counts = new HashMap<>();
         String query = "SELECT material, SUM(amount) as total FROM production_logs WHERE player_uuid = ? GROUP BY material";
 
@@ -122,6 +147,7 @@ public class DatabaseManager {
     }
 
     public int getPlayerTotalScore(String playerUUID) {
+        ensureConnection();
         String query = "SELECT SUM(total_score) as total FROM production_logs WHERE player_uuid = ?";
 
         try (PreparedStatement statement = connection.prepareStatement(query)) {
@@ -139,6 +165,7 @@ public class DatabaseManager {
     }
 
     public int getPlayerRank(String playerUUID) {
+        ensureConnection();
         String query = """
             SELECT COUNT(*) + 1 as rank
             FROM (

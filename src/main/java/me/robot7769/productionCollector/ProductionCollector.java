@@ -22,14 +22,14 @@ public final class ProductionCollector extends JavaPlugin {
         customLogger = new Logger(this);
 
         // Initialize database
-        databaseManager = new DatabaseManager(this, customLogger);
+        databaseManager = new DatabaseManager(this, getCustomLogger());
         databaseManager.connect();
 
         // Initialize scoreboard
-        productionScoreboard = new ProductionScoreboard(this, databaseManager);
+        productionScoreboard = new ProductionScoreboard(this, getDatabaseManager());
 
         // Register listeners
-        getServer().getPluginManager().registerEvents(new ProductionListener(this, databaseManager, productionScoreboard, customLogger), this);
+        getServer().getPluginManager().registerEvents(new ProductionListener(this, getDatabaseManager(), getProductionScoreboard(), getCustomLogger()), this);
         getServer().getPluginManager().registerEvents(new PlaceCollector(this), this);
         getServer().getPluginManager().registerEvents(new BreakCollector(this), this);
         getServer().getPluginManager().registerEvents(new PlayerJoinListener(this), this);

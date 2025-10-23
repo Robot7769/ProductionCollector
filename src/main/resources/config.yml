@@ -1,0 +1,17 @@
+database_address: mysql://172.18.0.1
+database_name: event_production
+database_user: eventer_DB
+database_password: Ev3N73R_I73m5
+
+# Logging configuration
+# Levels: NONE, ERROR, WARNING, INFO, DEBUG
+log_level: INFO
+log_to_file: true
+
+# Collectable items configuration
+# Format: MATERIAL_NAME: score_value
+collectable_items:
+  PUMPKIN: 3
+  PUMPKIN_PIE: 8
+  CARVED_PUMPKIN: 1
+  JACK_O_LANTERN: 4
